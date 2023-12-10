@@ -1,0 +1,101 @@
+/*
+    Spawns 5 processes A,B,C,D,E in 3 different namespaces with B/C being children of A and siblings with each other.
+
+    A is NS1, B/D is NS2, C/E in NS3
+        A
+       / \
+      B   C
+      /   \
+      D    E.
+
+    We need to change parent of E from C to B.
+    Source(E) -> Target(B)
+*/
+
+#define _GNU_SOURCE
+#include <sys/wait.h>
+#include <sys/utsname.h>
+#include <sched.h>
+#include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <assert.h>
+#include <linux/limits.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+
+#define STACK_SIZE (1024*1024)
+
+int
+childFunc2(void *arg)
+{  
+    int i =0;	
+    while(1){
+	// A pid=3 process should appear eventually
+    	printf("Child running: pid: %d %d\n", getpid(), i++);
+    	sleep(10);
+    }
+}
+
+int
+childFunc1(void *arg)
+{   
+    void* child_stack = malloc(STACK_SIZE);
+    assert(child_stack != NULL);
+
+    int child_num = *(int*)(arg);
+    pid_t child_pid;
+
+    child_pid = clone(childFunc2,
+                    child_stack + STACK_SIZE,
+                    SIGCHLD, NULL);
+        
+    assert(child_pid != -1);
+   
+    printf("%d Child[lvl: 1, num: %d] Speaking. Spawned child process with pid: %d!!\n", getpid(), child_num, child_pid);
+    printf("%d Child[lvl: 1, num: %d] Going to sleep\n", getpid(), child_num);
+    while(1) {}
+    wait(NULL);
+    printf("%d Child[lvl: 1, num: %d] Exited!!\n", getpid(), child_num);
+}
+
+int main() {
+    int fd, user_ns, old_net_ns, new_net_ns;
+
+    void* child_stack1 = malloc(STACK_SIZE);
+    void* child_stack2 = malloc(STACK_SIZE);
+
+    assert(child_stack1 != NULL);
+    assert(child_stack2 != NULL);
+    pid_t pid1, pid2;
+
+    /* Spawn a new user namespace */
+    int child_num = 1;
+    printf("[*] Spawn new pid namespace #1\n");
+    pid1 = clone(childFunc1,
+                child_stack1 + STACK_SIZE,
+                SIGCHLD | CLONE_NEWPID,  &child_num);
+    assert(pid1 != -1);
+    child_num++;
+    printf("[Parent] Child1 spawned with pid: %d\n", pid1);
+
+    printf("[*] Spawn new pid namespace #2\n");
+    pid2 = clone(childFunc1,
+               child_stack2 + STACK_SIZE,
+               SIGCHLD | CLONE_NEWPID, &child_num);
+    assert(pid2 != -1);
+    printf("[Parent] Child2 spawned with pid: %d\n", pid2);
+	
+    printf("Parent going to SLEEP\n");
+    sleep(30);
+    printf("Parent back from SLEEP, called WAIT\n");
+    while(1){} 
+    wait(NULL);
+
+    printf("######################################################## Parent Returned from WAIT or SLEEP  #####################3\n");
+    // while(1);
+	
+    return 0;
+}
